@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "RE_Project",
+    "slug": "RE_Project",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "yes",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs access to your camera for video interviews",
+        "NSMicrophoneUsageDescription": "This app needs access to your microphone for interview conversations"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": ["CAMERA", "RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS"],
+      "package": "com.amalkbiju.RE_Project"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-font", "expo-camera"]
+  }
+}
