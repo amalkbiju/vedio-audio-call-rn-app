@@ -375,24 +375,29 @@ const MessageScreen = ({ navigation, route }) => {
   const [remoteStream, setRemoteStream] = useState(null);
   const peerConnection = useRef(null);
 
+  // Audio call states
+  const [showAudioCall, setShowAudioCall] = useState(false);
+  const [audioLocalStream, setAudioLocalStream] = useState(null);
+  const [audioRemoteStream, setAudioRemoteStream] = useState(null);
+  const audioPeerConnection = useRef(null);
+  const [isCalling, setIsCalling] = useState(false);
+  const [callTimer, setCallTimer] = useState(0);
+  const timerRef = useRef(null);
+
   // Initialize WebRTC when component mounts
   useEffect(() => {
     // Initialize peer connection on component mount
     initializePeerConnection();
+    initializeAudioPeerConnection();
 
     return () => {
       // Clean up on unmount
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
-      }
-      if (peerConnection.current) {
-        peerConnection.current.close();
-        peerConnection.current = null;
-      }
+      cleanupVideoCall();
+      cleanupAudioCall();
     };
   }, []);
 
-  // Initialize peer connection
+  // Initialize video peer connection
   const initializePeerConnection = () => {
     console.log("Initializing peer connection");
     try {
@@ -425,6 +430,42 @@ const MessageScreen = ({ navigation, route }) => {
       };
     } catch (error) {
       console.error("Error initializing peer connection:", error);
+    }
+  };
+
+  // Initialize audio peer connection
+  const initializeAudioPeerConnection = () => {
+    console.log("Initializing audio peer connection");
+    try {
+      audioPeerConnection.current = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      // Handle remote stream
+      audioPeerConnection.current.ontrack = (event) => {
+        console.log("Audio remote track received");
+        if (event.streams && event.streams[0]) {
+          setAudioRemoteStream(event.streams[0]);
+        }
+      };
+
+      // Log connection state changes
+      audioPeerConnection.current.oniceconnectionstatechange = () => {
+        console.log(
+          "Audio ICE connection state:",
+          audioPeerConnection.current.iceConnectionState
+        );
+      };
+
+      // Log ICE candidate events
+      audioPeerConnection.current.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log("Audio ICE candidate:", event.candidate);
+          // Here you would send this candidate to the other peer via signaling server
+        }
+      };
+    } catch (error) {
+      console.error("Error initializing audio peer connection:", error);
     }
   };
 
@@ -501,26 +542,125 @@ const MessageScreen = ({ navigation, route }) => {
     }
   };
 
-  // End video call
-  const endVideoCall = () => {
-    console.log("Ending call");
+  // Start audio call
+  const startAudioCall = async () => {
+    try {
+      // Make sure peer connection is initialized
+      if (!audioPeerConnection.current) {
+        console.log("Audio peer connection not initialized, creating it now");
+        initializeAudioPeerConnection();
+      }
+
+      // Request permissions
+      if (Platform.OS === "android") {
+        console.log("Requesting Android permissions for audio");
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+        );
+
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          console.log("Audio permission not granted");
+          return;
+        }
+      }
+
+      console.log("Getting audio stream");
+      // Get local audio stream
+      const stream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+
+      console.log("Audio stream obtained");
+      setAudioLocalStream(stream);
+      setIsCalling(true);
+
+      // Add tracks to peer connection
+      console.log("Adding audio tracks to peer connection");
+      stream.getTracks().forEach((track) => {
+        audioPeerConnection.current.addTrack(track, stream);
+      });
+
+      // Create offer
+      console.log("Creating audio offer");
+      const offer = await audioPeerConnection.current.createOffer();
+      await audioPeerConnection.current.setLocalDescription(offer);
+
+      console.log("Audio offer created:", offer);
+
+      // Start call timer
+      timerRef.current = setInterval(() => {
+        setCallTimer((prev) => prev + 1);
+      }, 1000);
+
+      // Here you would typically send the offer to the other peer via a signaling server
+
+      // For demo purposes, we'll just show the audio call modal
+      setShowAudioCall(true);
+    } catch (error) {
+      console.error("Error starting audio call:", error);
+      alert(`Error starting audio call: ${error.message}`);
+    }
+  };
+
+  // Cleanup video call
+  const cleanupVideoCall = () => {
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
-      setLocalStream(null);
     }
-    if (remoteStream) {
-      setRemoteStream(null);
-    }
-
-    // Reset peer connection
     if (peerConnection.current) {
       peerConnection.current.close();
-      peerConnection.current = null;
-      // Reinitialize for next call
-      initializePeerConnection();
     }
+  };
+
+  // Cleanup audio call
+  const cleanupAudioCall = () => {
+    if (audioLocalStream) {
+      audioLocalStream.getTracks().forEach((track) => track.stop());
+    }
+    if (audioPeerConnection.current) {
+      audioPeerConnection.current.close();
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+  };
+
+  // End video call
+  const endVideoCall = () => {
+    console.log("Ending video call");
+
+    cleanupVideoCall();
+    setLocalStream(null);
+    setRemoteStream(null);
+
+    // Reinitialize for next call
+    initializePeerConnection();
 
     setShowVideoCall(false);
+  };
+
+  // End audio call
+  const endAudioCall = () => {
+    console.log("Ending audio call");
+
+    cleanupAudioCall();
+    setAudioLocalStream(null);
+    setAudioRemoteStream(null);
+    setIsCalling(false);
+    setCallTimer(0);
+
+    // Reinitialize for next call
+    initializeAudioPeerConnection();
+
+    setShowAudioCall(false);
+  };
+
+  // Format time for audio call
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
   // Get the first letter of the username for avatar
@@ -594,7 +734,7 @@ const MessageScreen = ({ navigation, route }) => {
           <TouchableOpacity style={styles.iconButton} onPress={startVideoCall}>
             <Icon name="videocam" size={22} color="#007AFF" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
+          <TouchableOpacity style={styles.iconButton} onPress={startAudioCall}>
             <Icon name="call" size={22} color="#007AFF" />
           </TouchableOpacity>
         </View>
@@ -670,6 +810,43 @@ const MessageScreen = ({ navigation, route }) => {
             <TouchableOpacity
               style={styles.endCallButton}
               onPress={endVideoCall}
+            >
+              <Icon name="call" size={30} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Audio Call Modal */}
+      <Modal
+        visible={showAudioCall}
+        animationType="slide"
+        onRequestClose={endAudioCall}
+      >
+        <SafeAreaView style={styles.audioContainer}>
+          <View style={styles.audioStatusContainer}>
+            <Text style={styles.audioCallerName}>{user.name}</Text>
+            {isCalling ? (
+              <Text style={styles.audioStatusText}>
+                {formatTime(callTimer)}
+              </Text>
+            ) : (
+              <Text style={styles.audioStatusText}>Connecting...</Text>
+            )}
+          </View>
+
+          <View style={styles.audioAvatarContainer}>
+            <View style={styles.audioAvatar}>
+              <Text style={styles.audioAvatarText}>
+                {getFirstLetter(user.name)}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.audioControlsContainer}>
+            <TouchableOpacity
+              style={styles.endAudioCallButton}
+              onPress={endAudioCall}
             >
               <Icon name="call" size={30} color="#FFFFFF" />
             </TouchableOpacity>
@@ -849,6 +1026,59 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   endCallButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#FF3B30",
+    justifyContent: "center",
+    alignItems: "center",
+    transform: [{ rotate: "135deg" }],
+  },
+
+  // Audio call styles
+  audioContainer: {
+    flex: 1,
+    backgroundColor: "#f0f0f0",
+    justifyContent: "space-between",
+    padding: 20,
+  },
+  audioStatusContainer: {
+    alignItems: "center",
+    marginTop: 50,
+  },
+  audioCallerName: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  audioStatusText: {
+    fontSize: 18,
+    color: "#666",
+    marginTop: 10,
+  },
+  audioAvatarContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  audioAvatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#007AFF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  audioAvatarText: {
+    fontSize: 40,
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  audioControlsContainer: {
+    alignItems: "center",
+    marginBottom: 50,
+  },
+  endAudioCallButton: {
     width: 60,
     height: 60,
     borderRadius: 30,
